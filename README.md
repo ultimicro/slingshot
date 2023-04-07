@@ -1,4 +1,6 @@
 # Slingshot
+[![CI](https://github.com/ultimicro/slingshot/actions/workflows/ci.yml/badge.svg)](https://github.com/ultimicro/slingshot/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/slingshot)](https://crates.io/crates/slingshot)
 
 Slingshot is an async runtime for Rust like Tokio or async-std. What makes Slingshot different from those runtimes is Slingshot working directly with data types from `std` like `std::net::TcpStream` instead of introducing a new data type.
 
