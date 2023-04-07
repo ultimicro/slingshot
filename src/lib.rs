@@ -179,5 +179,5 @@ pub trait Runtime: EventQueue {
     ) -> Self::TcpWrite<'a>;
 
     /// Create a future that will complete after `dur`.
-    fn delay<'a>(&'a self, dur: Duration, ct: Option<CancellationToken>) -> Self::Delay<'a>;
+    fn delay(&self, dur: Duration, ct: Option<CancellationToken>) -> Self::Delay<'_>;
 }

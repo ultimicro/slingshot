@@ -80,6 +80,12 @@ impl CancellationToken {
     }
 }
 
+impl Default for CancellationToken {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// An object to unsubscribe from [`CancellationToken`] when dropped.
 pub struct SubscriptionHandle {
     data: Arc<TokenData>,

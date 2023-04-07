@@ -102,7 +102,7 @@ impl Epoll {
             let data = Box::into_raw(Box::new(Event::TaskReady(i)));
 
             event.events = (EPOLLIN | EPOLLET | EPOLLONESHOT) as _;
-            event.u64 = unsafe { transmute(data) };
+            event.u64 = data as u64;
 
             if unsafe { epoll_ctl(fd.get(), EPOLL_CTL_ADD, pipe.0.get(), &mut event) } < 0 {
                 let e = Error::last_os_error();
@@ -136,7 +136,7 @@ impl Epoll {
         let data = Box::into_raw(Box::new(Event::IoReady(waker)));
         let mut event = epoll_event {
             events: (ev | EPOLLET | EPOLLONESHOT) as _,
-            u64: unsafe { transmute(data) },
+            u64: data as u64,
         };
 
         // Enable the FD. When adding or re-enable the FD the epoll will check if the FD is
@@ -206,9 +206,9 @@ impl EventQueue for Epoll {
 
         // Process the events. This loop MUST not break in the middle otherwise the memory may
         // be leak.
-        for i in 0..count {
+        for raw in raws.iter().take(count) {
             // Get the event data.
-            let event = match raws[i].u64 {
+            let event = match raw.u64 {
                 0 => {
                     // It is okay to break the loop when we received a shutdown signal. The only
                     // possible cases is epoll_wait() was error on the other thread or all tasks has
@@ -247,7 +247,7 @@ impl EventQueue for Epoll {
                     let data = Box::into_raw(Box::new(Event::TaskReady(i)));
                     let mut event = epoll_event {
                         events: (EPOLLIN | EPOLLET | EPOLLONESHOT) as _,
-                        u64: unsafe { transmute(data) },
+                        u64: data as u64,
                     };
 
                     if unsafe { epoll_ctl(self.fd.get(), EPOLL_CTL_MOD, fd.get(), &mut event) } < 0
@@ -357,7 +357,7 @@ impl Runtime for Epoll {
         Writing::new(self, tcp, buf, ct)
     }
 
-    fn delay<'a>(&'a self, dur: Duration, ct: Option<CancellationToken>) -> Delay<'a> {
+    fn delay(&self, dur: Duration, ct: Option<CancellationToken>) -> Delay<'_> {
         Delay::new(self, dur, ct)
     }
 }
