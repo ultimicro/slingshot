@@ -17,7 +17,14 @@ fn main() {
     let rt = Epoll::new();
 
     let client = async {
+        // Connect to the server.
         let mut client = TcpStream::connect("127.0.0.1:54336").expect("cannot connect to :54336");
+
+        client
+            .set_nonblocking(true)
+            .expect("cannot enable non-blocking mode");
+
+        // Write the data.
         let data = [7u8; 8];
 
         match rt.write_tcp(&mut client, &data, None).await {
@@ -44,6 +51,10 @@ fn main() {
             Err(e) => panic!("cannot accept a connection: {e}"),
         };
 
+        client
+            .set_nonblocking(true)
+            .expect("cannot enable non-blocking mode");
+
         assert!(addr.ip().is_loopback());
 
         // Read.
@@ -58,7 +69,6 @@ fn main() {
         }
     });
 }
-
 ```
 
 ## License
