@@ -7,8 +7,8 @@ on:
     branches:
     - main
 jobs:
-  build:
-    name: Build
+  linux:
+    name: Build (Linux)
     runs-on: ubuntu-22.04
     steps:
     - name: Checkout source
@@ -17,5 +17,15 @@ jobs:
       run: cargo fmt --check
     - name: Run Clippy
       run: cargo clippy -- -D warnings
+    - name: Run tests
+      run: cargo test
+  windows:
+    name: Build (Windows)
+    runs-on: windows-2022
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v3
+    - name: Build
+      run: cargo build
     - name: Run tests
       run: cargo test

@@ -3,6 +3,7 @@ use slingshot::{run, Runtime};
 use std::net::{TcpListener, TcpStream};
 
 #[test]
+#[cfg(target_os = "linux")]
 fn test_epoll_tcp() {
     let rt = Epoll::new();
 

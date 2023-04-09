@@ -16,6 +16,8 @@ pub mod future;
 #[cfg(target_os = "linux")]
 pub mod linux;
 pub mod task;
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 /// Block the current thread until all futures has been completed. This function can be called only
 /// once.
