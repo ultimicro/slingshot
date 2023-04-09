@@ -5,7 +5,6 @@ use std::net::TcpListener;
 use std::time::Duration;
 
 #[test]
-#[cfg(target_os = "linux")]
 fn test_epoll_cancel() {
     let rt = Epoll::new();
     let ct = CancellationToken::new();

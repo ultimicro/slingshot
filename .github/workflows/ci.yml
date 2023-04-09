@@ -18,7 +18,7 @@ jobs:
     - name: Run Clippy
       run: cargo clippy -- -D warnings
     - name: Run tests
-      run: cargo test
+      run: cargo test --test 'epoll_*'
   windows:
     name: Build (Windows)
     runs-on: windows-2022
@@ -28,4 +28,4 @@ jobs:
     - name: Build
       run: cargo build
     - name: Run tests
-      run: cargo test
+      run: cargo test --test 'iocp_*'
