@@ -2,9 +2,10 @@ use libc::{close, fcntl, pipe, F_GETFL, F_SETFL, O_NONBLOCK, STDERR_FILENO};
 use std::ffi::c_int;
 use std::fmt::{Display, Formatter};
 use std::io::Error;
+use std::os::fd::{AsRawFd, RawFd};
 
 /// Encapsulate a file descriptor.
-pub(crate) struct Fd(c_int);
+pub struct Fd(c_int);
 
 impl Fd {
     /// A shorthand for libc [`pipe()`].
@@ -57,5 +58,11 @@ impl Drop for Fd {
 impl Display for Fd {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "#{}", self.0)
+    }
+}
+
+impl AsRawFd for Fd {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0
     }
 }
