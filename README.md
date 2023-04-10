@@ -2,9 +2,12 @@
 [![CI](https://github.com/ultimicro/slingshot/actions/workflows/ci.yml/badge.svg)](https://github.com/ultimicro/slingshot/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/slingshot)](https://crates.io/crates/slingshot)
 
-Slingshot is an async runtime for Rust like Tokio or async-std. What makes Slingshot different from those runtimes is Slingshot working directly with data types from `std` like `std::net::TcpStream` instead of introducing a new data type.
+Slingshot is a bare metal performance async runtime for Rust similar to Tokio or async-std. What makes Slingshot different from those runtimes is:
 
-Currently it supports only Linux but the runtime was designed as a cross platform so any PR to add supports for the other platforms is welcome!
+- It is working directly with the data types from `std` like `std::net::TcpStream` instead of introducing a new data type.
+- It is a bare metal runtime with (almost) zero cost the same as C that directly using a platform-specific I/O notification system.
+
+Currently it is supports only Linux but the runtime was designed as a cross platform so any PR to add supports for the other platforms is welcome!
 
 ## Examples
 

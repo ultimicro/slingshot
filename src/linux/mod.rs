@@ -1,12 +1,13 @@
+use self::signal::SignalRead;
 use self::tcp::{Accepting, Reading, Writing};
 use self::time::Delay;
 use crate::cancel::{CancellationToken, SubscriptionHandle};
 use crate::fd::Fd;
 use crate::{EventQueue, Runtime};
 use libc::{
-    epoll_create1, epoll_ctl, epoll_event, epoll_wait, eventfd, read, write, EAGAIN, EFD_CLOEXEC,
-    EFD_NONBLOCK, ENOENT, EPOLLET, EPOLLIN, EPOLLONESHOT, EPOLL_CLOEXEC, EPOLL_CTL_ADD,
-    EPOLL_CTL_MOD,
+    epoll_create1, epoll_ctl, epoll_event, epoll_wait, eventfd, read, signalfd_siginfo, write,
+    EAGAIN, EFD_CLOEXEC, EFD_NONBLOCK, ENOENT, EPOLLET, EPOLLIN, EPOLLONESHOT, EPOLL_CLOEXEC,
+    EPOLL_CTL_ADD, EPOLL_CTL_MOD,
 };
 use std::ffi::c_int;
 use std::future::Future;
@@ -14,12 +15,14 @@ use std::io::Error;
 use std::mem::{size_of, transmute};
 use std::net::{TcpListener, TcpStream};
 use std::num::NonZeroUsize;
+use std::os::fd::AsRawFd;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 use std::thread::available_parallelism;
 use std::time::Duration;
 
+pub mod signal;
 pub mod tcp;
 pub mod time;
 
@@ -362,8 +365,36 @@ impl Runtime for Epoll {
     }
 }
 
+impl LinuxRuntime for Epoll {
+    type SignalRead<'a, S> = SignalRead<'a, S> where S: AsRawFd + 'a;
+
+    unsafe fn read_signal<'a, S: AsRawFd>(
+        &'a self,
+        sig: &'a mut S,
+        ct: Option<CancellationToken>,
+    ) -> SignalRead<'a, S> {
+        SignalRead::new(self, sig, ct)
+    }
+}
+
 /// A data for each epoll event.
 enum Event {
     TaskReady(usize),
     IoReady(Waker),
+}
+
+/// Provides additional Linux-specific methods to do asynchronous I/O.
+pub trait LinuxRuntime: Runtime {
+    type SignalRead<'a, S>: Future<Output = std::io::Result<signalfd_siginfo>>
+    where
+        Self: 'a,
+        S: AsRawFd + 'a;
+
+    /// Read a signal FD. `sig` must be a valid signal FD and must be in non-blocking mode otherwise
+    /// the call will be block.
+    unsafe fn read_signal<'a, S: AsRawFd>(
+        &'a self,
+        sig: &'a mut S,
+        ct: Option<CancellationToken>,
+    ) -> Self::SignalRead<'a, S>;
 }

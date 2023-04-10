@@ -2,7 +2,7 @@
 name = "slingshot"
 version = "0.1.0"
 edition = "2021"
-description = "Async runtime that work with std types"
+description = "Bare metal async runtime that works with std types"
 repository = "https://github.com/ultimicro/slingshot"
 license = "MIT"
 
