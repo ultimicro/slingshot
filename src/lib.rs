@@ -135,19 +135,19 @@ pub trait EventQueue: Sync {
 
 /// Provides methods to do asynchronous I/O on std types.
 pub trait Runtime: EventQueue {
-    type TcpAccept<'a>: Future<Output = std::io::Result<(TcpStream, SocketAddr)>>
+    type TcpAccept<'a>: Future<Output = std::io::Result<(TcpStream, SocketAddr)>> + Send
     where
         Self: 'a;
 
-    type TcpRead<'a>: Future<Output = std::io::Result<usize>>
+    type TcpRead<'a>: Future<Output = std::io::Result<usize>> + Send
     where
         Self: 'a;
 
-    type TcpWrite<'a>: Future<Output = std::io::Result<usize>>
+    type TcpWrite<'a>: Future<Output = std::io::Result<usize>> + Send
     where
         Self: 'a;
 
-    type Delay<'a>: Future<Output = std::io::Result<()>>
+    type Delay<'a>: Future<Output = std::io::Result<()>> + Send
     where
         Self: 'a;
 
