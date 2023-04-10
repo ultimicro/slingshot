@@ -390,8 +390,10 @@ pub trait LinuxRuntime: Runtime {
         Self: 'a,
         S: AsRawFd + 'a;
 
-    /// Read a signal FD. `sig` must be a valid signal FD and must be in non-blocking mode otherwise
-    /// the call will be block.
+    /// Read a signalfd. `sig` must be in non-blocking mode otherwise the call will be block.
+    ///
+    /// # Safety
+    /// `sig` must be a valid signalfd.
     unsafe fn read_signal<'a, S: AsRawFd>(
         &'a self,
         sig: &'a mut S,
