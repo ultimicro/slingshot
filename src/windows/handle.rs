@@ -8,6 +8,10 @@ impl Handle {
     pub fn new(h: HANDLE) -> Self {
         Self(h)
     }
+
+    pub fn get(&self) -> HANDLE {
+        self.0
+    }
 }
 
 impl Drop for Handle {

@@ -5,12 +5,16 @@ use crate::cancel::CancellationToken;
 use crate::{EventQueue, Runtime};
 use std::future::Future;
 use std::io::Error;
+use std::mem::MaybeUninit;
 use std::net::{TcpListener, TcpStream};
 use std::num::NonZeroUsize;
 use std::pin::Pin;
+use std::thread::available_parallelism;
 use std::time::Duration;
-use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-use windows_sys::Win32::System::IO::CreateIoCompletionPort;
+use windows_sys::Win32::Foundation::{FALSE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::System::IO::{
+    CreateIoCompletionPort, GetQueuedCompletionStatusEx, OVERLAPPED_ENTRY,
+};
 
 pub mod handle;
 pub mod tcp;
@@ -43,14 +47,33 @@ impl Iocp {
 
 impl EventQueue for Iocp {
     fn thread_count(&self) -> NonZeroUsize {
-        todo!();
+        available_parallelism().expect("cannot determine a number of worker thread")
     }
 
     fn dequeue(
         &self,
         ready: &mut Vec<Pin<Box<dyn Future<Output = ()> + Send>>>,
     ) -> std::io::Result<bool> {
-        todo!();
+        // Wait for the events.
+        let mut events: [MaybeUninit<OVERLAPPED_ENTRY>; 64] =
+            unsafe { MaybeUninit::uninit().assume_init() };
+        let mut count = 0;
+
+        if unsafe {
+            GetQueuedCompletionStatusEx(
+                self.iocp.get(),
+                events.as_mut_ptr() as _,
+                64,
+                &mut count,
+                0xffffffff,
+                FALSE,
+            )
+        } == FALSE
+        {
+            return Err(Error::last_os_error());
+        }
+
+        todo!()
     }
 
     fn drop_task(&self, task: Pin<Box<dyn Future<Output = ()> + Send>>) -> bool {
