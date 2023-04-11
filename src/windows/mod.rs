@@ -1,22 +1,43 @@
+use self::handle::Handle;
 use self::tcp::{TcpAccept, TcpRead, TcpWrite};
 use self::time::Delay;
 use crate::cancel::CancellationToken;
 use crate::{EventQueue, Runtime};
 use std::future::Future;
+use std::io::Error;
 use std::net::{TcpListener, TcpStream};
 use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::time::Duration;
+use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+use windows_sys::Win32::System::IO::CreateIoCompletionPort;
 
+pub mod handle;
 pub mod tcp;
 pub mod time;
 
 /// An implementation of [`Runtime`] backed by an I/O completion port.
-pub struct Iocp {}
+pub struct Iocp {
+    iocp: Handle,
+}
 
 impl Iocp {
     pub fn new() -> &'static Self {
-        Box::leak(Box::new(Self {}))
+        // Create an I/O completion port.
+        let iocp = {
+            let handle = unsafe { CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0) };
+
+            if handle == 0 {
+                panic!(
+                    "cannot create an I/O completion port: {}",
+                    Error::last_os_error()
+                );
+            }
+
+            Handle::new(handle)
+        };
+
+        Box::leak(Box::new(Self { iocp }))
     }
 }
 
