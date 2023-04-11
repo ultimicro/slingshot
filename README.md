@@ -6,6 +6,7 @@ Slingshot is a bare metal performance async runtime for Rust similar to Tokio or
 
 - It is working directly with the data types from `std` like `std::net::TcpStream` instead of introducing a new data type.
 - It is a bare metal runtime with (almost) zero cost the same as C that directly using a platform-specific I/O notification system.
+- It is guarantee that all futures will run to completion if the process does not forced to exit.
 
 Currently it is supports only Linux but the runtime was designed as a cross platform so any PR to add supports for the other platforms is welcome!
 

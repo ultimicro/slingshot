@@ -12,6 +12,10 @@ impl Handle {
     pub fn get(&self) -> HANDLE {
         self.0
     }
+
+    pub fn into_raw(self) -> HANDLE {
+        self.0
+    }
 }
 
 impl Drop for Handle {
