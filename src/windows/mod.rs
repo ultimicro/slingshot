@@ -213,8 +213,8 @@ impl Runtime for Iocp {
         todo!();
     }
 
-    fn delay(&self, dur: Duration, ct: Option<CancellationToken>) -> Self::Delay<'_> {
-        todo!();
+    fn delay(&self, dur: Duration, ct: Option<CancellationToken>) -> Delay<'_> {
+        Delay::new(dur, ct)
     }
 }
 
