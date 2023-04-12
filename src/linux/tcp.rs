@@ -1,6 +1,6 @@
 use super::Epoll;
 use crate::cancel::{CancellationToken, SubscriptionHandle};
-use crate::future::io_cancel;
+use crate::future::{io_cancel, watch_cancel};
 use libc::{EPOLLIN, EPOLLOUT};
 use std::future::Future;
 use std::io::{ErrorKind, Read, Write};
@@ -63,7 +63,7 @@ impl<'a> Future for Accepting<'a> {
             return Poll::Ready(v);
         }
 
-        f.ch = f.ep.watch_cancel(cx, &f.ct);
+        f.ch = watch_cancel(cx, &f.ct);
 
         Poll::Pending
     }
@@ -125,7 +125,7 @@ impl<'a> Future for Reading<'a> {
             return Poll::Ready(v);
         }
 
-        f.ch = f.ep.watch_cancel(cx, &f.ct);
+        f.ch = watch_cancel(cx, &f.ct);
 
         Poll::Pending
     }
@@ -187,7 +187,7 @@ impl<'a> Future for Writing<'a> {
             return Poll::Ready(v);
         }
 
-        f.ch = f.ep.watch_cancel(cx, &f.ct);
+        f.ch = watch_cancel(cx, &f.ct);
 
         Poll::Pending
     }

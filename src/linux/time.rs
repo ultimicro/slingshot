@@ -1,7 +1,7 @@
 use super::Epoll;
 use crate::cancel::{CancellationToken, SubscriptionHandle};
 use crate::fd::Fd;
-use crate::future::io_cancel;
+use crate::future::{io_cancel, watch_cancel};
 use libc::{
     itimerspec, read, timerfd_create, timerfd_settime, timespec, CLOCK_MONOTONIC, EPOLLIN,
     TFD_CLOEXEC, TFD_NONBLOCK,
@@ -122,7 +122,7 @@ impl<'a> Future for Delay<'a> {
                 return Poll::Ready(v);
             }
 
-            f.ch = f.ep.watch_cancel(cx, &f.ct);
+            f.ch = watch_cancel(cx, &f.ct);
 
             Poll::Pending
         } else {

@@ -1,7 +1,7 @@
 use self::signal::SignalRead;
 use self::tcp::{Accepting, Reading, Writing};
 use self::time::Delay;
-use crate::cancel::{CancellationToken, SubscriptionHandle};
+use crate::cancel::CancellationToken;
 use crate::fd::Fd;
 use crate::{EventQueue, Runtime};
 use libc::{
@@ -163,19 +163,6 @@ impl Epoll {
         }
 
         Poll::Pending
-    }
-
-    fn watch_cancel(
-        &self,
-        cx: &mut Context,
-        ct: &Option<CancellationToken>,
-    ) -> Option<SubscriptionHandle> {
-        if let Some(ct) = ct {
-            let waker = cx.waker().clone();
-            ct.subscribe(move || waker.wake())
-        } else {
-            None
-        }
     }
 }
 

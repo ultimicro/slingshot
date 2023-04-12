@@ -1,6 +1,6 @@
 use super::Epoll;
 use crate::cancel::{CancellationToken, SubscriptionHandle};
-use crate::future::io_cancel;
+use crate::future::{io_cancel, watch_cancel};
 use libc::{read, signalfd_siginfo, EPOLLIN};
 use std::future::Future;
 use std::io::{Error, ErrorKind};
@@ -62,7 +62,7 @@ impl<'a, S: AsRawFd> Future for SignalRead<'a, S> {
                 return Poll::Ready(v);
             }
 
-            f.ch = f.ep.watch_cancel(cx, &f.ct);
+            f.ch = watch_cancel(cx, &f.ct);
 
             Poll::Pending
         } else {
