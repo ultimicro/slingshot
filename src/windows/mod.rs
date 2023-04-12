@@ -58,7 +58,7 @@ impl Iocp {
     fn shutdown(&self) {
         if self
             .closed
-            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
             return;
@@ -72,7 +72,7 @@ impl Iocp {
 
 impl Drop for Iocp {
     fn drop(&mut self) {
-        if !self.closed.load(Ordering::Relaxed) {
+        if !self.closed.load(Ordering::Acquire) {
             if unsafe { CloseHandle(self.iocp) } == 0 {
                 panic!("cannot close the IOCP handle: {}", Error::last_os_error());
             }
@@ -140,12 +140,14 @@ impl EventQueue for Iocp {
 
     fn drop_task(&self, _: Pin<Box<dyn Future<Output = ()> + Send>>) -> bool {
         // Decrease the number of active tasks.
-        self.active_tasks.fetch_sub(1, Ordering::Relaxed);
+        if self.active_tasks.fetch_sub(1, Ordering::Relaxed) != 1 {
+            return true;
+        }
 
         // Toggle shutdown if all tasks has been completed.
         if self
             .active_tasks
-            .compare_exchange(0, isize::MIN, Ordering::Relaxed, Ordering::Relaxed)
+            .compare_exchange(0, isize::MIN, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
             return true;
@@ -177,7 +179,7 @@ impl Runtime for Iocp {
 
     fn spawn<T: Future<Output = ()> + Send + 'static>(&self, task: T) -> Option<T> {
         // Increase the number of active tasks.
-        if self.active_tasks.fetch_add(1, Ordering::Relaxed) < 0 {
+        if self.active_tasks.fetch_add(1, Ordering::AcqRel) < 0 {
             return Some(task);
         }
 

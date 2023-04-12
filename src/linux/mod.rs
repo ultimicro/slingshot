@@ -255,7 +255,7 @@ impl EventQueue for Epoll {
 
     fn drop_task(&self, _: Pin<Box<dyn Future<Output = ()> + Send>>) -> bool {
         // Decrease the number of active task.
-        if self.active_tasks.fetch_sub(1, Ordering::AcqRel) != 1 {
+        if self.active_tasks.fetch_sub(1, Ordering::Relaxed) != 1 {
             return true;
         }
 
@@ -276,16 +276,16 @@ impl EventQueue for Epoll {
         // Get the ready pipe.
         let fd = loop {
             // Get the next pipe.
-            let i = self.next_ready.fetch_add(1, Ordering::AcqRel);
+            let i = self.next_ready.fetch_add(1, Ordering::Relaxed);
 
             if let Some(v) = self.ready_pipes.get(i) {
                 break &v.1;
             }
 
             // Reset the next pipe to zero.
-            let _ = self
-                .next_ready
-                .compare_exchange(i + 1, 0, Ordering::AcqRel, Ordering::Acquire);
+            let _ =
+                self.next_ready
+                    .compare_exchange(i + 1, 0, Ordering::Relaxed, Ordering::Relaxed);
         };
 
         // Send the task to the ready pipe.

@@ -20,7 +20,7 @@ impl CancellationToken {
     }
 
     pub fn is_canceled(&self) -> bool {
-        self.data.canceled.load(Ordering::Acquire)
+        self.data.canceled.load(Ordering::Relaxed)
     }
 
     pub fn cancel(&self) {
@@ -30,7 +30,7 @@ impl CancellationToken {
         if self
             .data
             .canceled
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
             .is_err()
         {
             return;
