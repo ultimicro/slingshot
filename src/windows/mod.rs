@@ -1,27 +1,29 @@
 use self::handle::Handle;
+use self::overlapped::Overlapped;
 use self::tcp::{TcpAccept, TcpRead, TcpWrite};
 use self::time::Delay;
 use crate::cancel::CancellationToken;
 use crate::{EventQueue, Runtime};
 use std::future::Future;
 use std::io::Error;
-use std::mem::MaybeUninit;
 use std::net::{TcpListener, TcpStream};
 use std::num::NonZeroUsize;
 use std::pin::Pin;
-use std::ptr::null;
+use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::thread::available_parallelism;
 use std::time::Duration;
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ABANDONED_WAIT_0, FALSE, HANDLE, INVALID_HANDLE_VALUE,
 };
+use windows_sys::Win32::System::Threading::INFINITE;
 use windows_sys::Win32::System::IO::{
-    CreateIoCompletionPort, GetQueuedCompletionStatusEx, PostQueuedCompletionStatus,
-    OVERLAPPED_ENTRY,
+    CreateIoCompletionPort, GetQueuedCompletionStatus, PostQueuedCompletionStatus,
 };
 
 pub mod handle;
+pub mod overlapped;
+pub mod socket;
 pub mod tcp;
 pub mod time;
 
@@ -53,6 +55,14 @@ impl Iocp {
             active_tasks: AtomicIsize::new(0),
             closed: AtomicBool::new(false),
         }))
+    }
+
+    fn register_handle(&self, handle: HANDLE) -> Result<(), Error> {
+        if unsafe { CreateIoCompletionPort(handle, self.iocp, 0, 0) } == 0 {
+            Err(Error::last_os_error())
+        } else {
+            Ok(())
+        }
     }
 
     fn shutdown(&self) {
@@ -89,50 +99,45 @@ impl EventQueue for Iocp {
         &self,
         ready: &mut Vec<Pin<Box<dyn Future<Output = ()> + Send>>>,
     ) -> std::io::Result<bool> {
-        // Wait for the events.
-        let mut events: [MaybeUninit<OVERLAPPED_ENTRY>; 64] =
-            unsafe { MaybeUninit::uninit().assume_init() };
-        let mut count = 0;
-
-        if unsafe {
-            GetQueuedCompletionStatusEx(
+        // Wait for the event.
+        let mut transferred = 0;
+        let mut key = 0;
+        let mut overlapped = null_mut();
+        let error = if unsafe {
+            GetQueuedCompletionStatus(
                 self.iocp,
-                events.as_mut_ptr() as _,
-                64,
-                &mut count,
-                0xffffffff,
-                FALSE,
+                &mut transferred,
+                &mut key,
+                &mut overlapped,
+                INFINITE,
             )
         } == FALSE
         {
-            // Check if a shutdown.
             let e = Error::last_os_error();
 
-            if e.raw_os_error().unwrap() == ERROR_ABANDONED_WAIT_0 as _ {
-                return Ok(false);
-            } else {
-                self.shutdown();
-                return Err(e);
+            // Check if I/O failed.
+            if overlapped.is_null() {
+                // Check if a shutdown.
+                return if e.raw_os_error().unwrap() == ERROR_ABANDONED_WAIT_0 as _ {
+                    Ok(false)
+                } else {
+                    self.shutdown();
+                    Err(e)
+                };
             }
-        }
 
-        // Process the events.
-        for event in events
-            .iter()
-            .map(|e| unsafe { e.assume_init_ref() })
-            .take(count as _)
-        {
-            // Check event type.
-            match event.lpCompletionKey {
-                0 => todo!(),
-                key => {
-                    let event = unsafe { *Box::from_raw(key as *mut Event) };
+            Some(e)
+        } else {
+            None
+        };
 
-                    match event {
-                        Event::TaskReady(task) => ready.push(task.into()),
-                    }
-                }
+        // Check event type.
+        if overlapped.is_null() {
+            match unsafe { *Box::from_raw(key as *mut Event) } {
+                Event::TaskReady(task) => ready.push(task.into()),
             }
+        } else {
+            unsafe { Box::from_raw(overlapped as *mut Overlapped) }.complete(error);
         }
 
         Ok(true)
@@ -193,8 +198,8 @@ impl Runtime for Iocp {
         &'a self,
         tcp: &'a mut TcpListener,
         ct: Option<CancellationToken>,
-    ) -> Self::TcpAccept<'a> {
-        todo!();
+    ) -> TcpAccept<'a> {
+        TcpAccept::new(self, tcp, ct)
     }
 
     fn read_tcp<'a>(

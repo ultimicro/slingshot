@@ -1,4 +1,4 @@
-use std::io::Error;
+use std::{io::Error, mem::forget};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 
 /// Encapsulate a Win32 handle.
@@ -9,12 +9,10 @@ impl Handle {
         Self(h)
     }
 
-    pub fn get(&self) -> HANDLE {
-        self.0
-    }
-
     pub fn into_raw(self) -> HANDLE {
-        self.0
+        let h = self.0;
+        forget(self);
+        h
     }
 }
 
