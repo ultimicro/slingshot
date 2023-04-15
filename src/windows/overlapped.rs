@@ -45,12 +45,12 @@ impl Overlapped {
         unsafe { (*self.buf.get()).as_mut_ptr() }
     }
 
-    pub fn complete(self, e: Option<std::io::Error>) {
+    pub fn complete(self, transferred: usize, error: Option<std::io::Error>) {
         // Set the data.
         if let Some(v) = self.data.upgrade() {
-            v.set_completed(match e {
+            v.set_completed(match error {
                 Some(v) => OverlappedResult::Error(v),
-                None => OverlappedResult::Success(self.buf.into_inner()),
+                None => OverlappedResult::Success(self.buf.into_inner(), transferred),
             });
         };
 
@@ -67,5 +67,5 @@ pub(super) trait OverlappedData: Send + Sync {
 /// Result of an overlapped operation.
 pub(super) enum OverlappedResult {
     Error(std::io::Error),
-    Success(Vec<u8>),
+    Success(Vec<u8>, usize),
 }

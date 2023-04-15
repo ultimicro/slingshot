@@ -137,7 +137,8 @@ impl EventQueue for Iocp {
                 Event::TaskReady(task) => ready.push(task.into()),
             }
         } else {
-            unsafe { Box::from_raw(overlapped as *mut Overlapped) }.complete(error);
+            let overlapped = unsafe { Box::from_raw(overlapped as *mut Overlapped) };
+            overlapped.complete(transferred as _, error);
         }
 
         Ok(true)
@@ -207,8 +208,8 @@ impl Runtime for Iocp {
         tcp: &'a mut TcpStream,
         buf: &'a mut [u8],
         ct: Option<CancellationToken>,
-    ) -> Self::TcpRead<'a> {
-        todo!();
+    ) -> TcpRead<'a> {
+        TcpRead::new(self, tcp, buf, ct)
     }
 
     fn write_tcp<'a>(
