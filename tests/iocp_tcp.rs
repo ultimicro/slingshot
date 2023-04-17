@@ -1,5 +1,5 @@
-use slingshot::{run, Runtime};
 use slingshot::windows::Iocp;
+use slingshot::{run, Runtime};
 use std::net::{TcpListener, TcpStream};
 
 #[test]
