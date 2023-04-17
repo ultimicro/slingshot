@@ -8,12 +8,11 @@ use windows_sys::Win32::System::IO::{OVERLAPPED, OVERLAPPED_0, OVERLAPPED_0_0};
 pub(super) struct Overlapped {
     raw: OVERLAPPED, // MUST be the first field.
     buf: UnsafeCell<Vec<u8>>,
-    waker: Waker,
     data: Weak<dyn OverlappedData>,
 }
 
 impl Overlapped {
-    pub fn new<D>(offset: Option<u64>, buf: Vec<u8>, waker: Waker, data: Weak<D>) -> Box<Self>
+    pub fn new<D>(offset: Option<u64>, buf: Vec<u8>, data: Weak<D>) -> Box<Self>
     where
         D: OverlappedData + 'static,
     {
@@ -36,7 +35,6 @@ impl Overlapped {
                 hEvent: 0,
             },
             buf: UnsafeCell::new(buf),
-            waker,
             data,
         })
     }
@@ -46,22 +44,25 @@ impl Overlapped {
     }
 
     pub fn complete(self, transferred: usize, error: Option<std::io::Error>) {
-        // Set the data.
-        if let Some(v) = self.data.upgrade() {
-            v.set_completed(match error {
-                Some(v) => OverlappedResult::Error(v),
-                None => OverlappedResult::Success(self.buf.into_inner(), transferred),
-            });
+        // Get data.
+        let data = match self.data.upgrade() {
+            Some(v) => v,
+            None => return,
         };
 
-        // Wake the task.
-        self.waker.wake();
+        // Set the result and wake the task.
+        let waker = data.set_completed(match error {
+            Some(v) => OverlappedResult::Error(v),
+            None => OverlappedResult::Success(self.buf.into_inner(), transferred),
+        });
+
+        waker.wake();
     }
 }
 
 /// Additional data to attached with [`Overlapped`].
 pub(super) trait OverlappedData: Send + Sync {
-    fn set_completed(&self, r: OverlappedResult);
+    fn set_completed(&self, r: OverlappedResult) -> Waker;
 }
 
 /// Result of an overlapped operation.

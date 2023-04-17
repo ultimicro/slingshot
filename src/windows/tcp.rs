@@ -13,7 +13,7 @@ use std::os::windows::prelude::{AsRawSocket, FromRawSocket};
 use std::pin::Pin;
 use std::ptr::{null, null_mut};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, Waker};
 use windows_sys::Win32::Foundation::{ERROR_IO_PENDING, ERROR_NOT_FOUND, FALSE};
 use windows_sys::Win32::Networking::WinSock::{
     socket, AcceptEx, GetAcceptExSockaddrs, WSARecv, WSASend, AF_INET, AF_INET6, INVALID_SOCKET,
@@ -77,6 +77,7 @@ impl<'a> TcpAccept<'a> {
             client: Some(client),
             addr_len,
             result: None,
+            waker: Some(cx.waker().clone()),
         }));
 
         // Register the socket to IOCP.
@@ -85,10 +86,9 @@ impl<'a> TcpAccept<'a> {
         self.iocp.register_handle(server as _)?;
 
         // Do the accept.
-        let waker = cx.waker().clone();
         let buf = vec![0u8; (addr_len * 2) as usize];
         let mut received = 0;
-        let overlapped = Box::into_raw(Overlapped::new(None, buf, waker, Arc::downgrade(&pending)));
+        let overlapped = Box::into_raw(Overlapped::new(None, buf, Arc::downgrade(&pending)));
 
         if unsafe {
             AcceptEx(
@@ -191,14 +191,20 @@ impl<'a> Future for TcpAccept<'a> {
 
         // Check for pending.
         match &f.pending {
-            Some(p) => match Self::end_accept(p.lock().unwrap().deref_mut()) {
-                Ok(v) => {
-                    if let Some(v) = v {
-                        return Poll::Ready(Ok(v));
+            Some(p) => {
+                let mut p = p.lock().unwrap();
+
+                match Self::end_accept(&mut p) {
+                    Ok(v) => {
+                        if let Some(v) = v {
+                            return Poll::Ready(Ok(v));
+                        }
                     }
+                    Err(e) => return Poll::Ready(Err(e)),
                 }
-                Err(e) => return Poll::Ready(Err(e)),
-            },
+
+                p.waker = Some(cx.waker().clone());
+            }
             None => match f.begin_accept(cx) {
                 Ok(v) => f.pending = Some(v),
                 Err(e) => return Poll::Ready(Err(e)),
@@ -251,14 +257,14 @@ impl<'a> TcpRead<'a> {
         let pending = Arc::new(Mutex::new(ReadPending {
             cancel: Some(socket),
             result: None,
+            waker: Some(cx.waker().clone()),
         }));
 
         // Register the socket to IOCP.
         self.iocp.register_handle(socket as _)?;
 
         // Do the receive.
-        let waker = cx.waker().clone();
-        let overlapped = Box::into_raw(Overlapped::new(None, buf, waker, Arc::downgrade(&pending)));
+        let overlapped = Box::into_raw(Overlapped::new(None, buf, Arc::downgrade(&pending)));
         let mut flags = 0;
 
         if unsafe {
@@ -303,11 +309,6 @@ impl<'a> Future for TcpRead<'a> {
             }
         }
 
-        // Check if we don't do the actual receive.
-        if f.buf.is_empty() {
-            return Poll::Ready(Ok(0));
-        }
-
         // Check if operation is pending.
         match &f.pending {
             Some(p) => {
@@ -330,11 +331,20 @@ impl<'a> Future for TcpRead<'a> {
 
                     return Poll::Ready(r);
                 }
+
+                p.waker = Some(cx.waker().clone());
             }
-            None => match f.begin_read(cx) {
-                Ok(v) => f.pending = Some(v),
-                Err(e) => return Poll::Ready(Err(e)),
-            },
+            None => {
+                // Check if we don't do the actual receive.
+                if f.buf.is_empty() {
+                    return Poll::Ready(Ok(0));
+                }
+
+                f.pending = match f.begin_read(cx) {
+                    Ok(v) => Some(v),
+                    Err(e) => return Poll::Ready(Err(e)),
+                };
+            }
         }
 
         // Watch for cancel.
@@ -381,14 +391,14 @@ impl<'a> TcpWrite<'a> {
         let pending = Arc::new(Mutex::new(WritePending {
             cancel: Some(socket),
             result: None,
+            waker: Some(cx.waker().clone()),
         }));
 
         // Register the socket to IOCP.
         self.iocp.register_handle(socket as _)?;
 
         // Do the receive.
-        let waker = cx.waker().clone();
-        let overlapped = Box::into_raw(Overlapped::new(None, buf, waker, Arc::downgrade(&pending)));
+        let overlapped = Box::into_raw(Overlapped::new(None, buf, Arc::downgrade(&pending)));
 
         if unsafe {
             WSASend(
@@ -448,14 +458,20 @@ impl<'a> Future for TcpWrite<'a> {
 
         // Check if operation is pending.
         match &f.pending {
-            Some(p) => match Self::end_write(p.lock().unwrap().deref_mut()) {
-                Ok(v) => {
-                    if let Some(v) = v {
-                        return Poll::Ready(Ok(v));
+            Some(p) => {
+                let mut p = p.lock().unwrap();
+
+                match Self::end_write(&mut p) {
+                    Ok(v) => {
+                        if let Some(v) = v {
+                            return Poll::Ready(Ok(v));
+                        }
                     }
+                    Err(e) => return Poll::Ready(Err(e)),
                 }
-                Err(e) => return Poll::Ready(Err(e)),
-            },
+
+                p.waker = Some(cx.waker().clone());
+            }
             None => {
                 // Check if we don't need to do the actual write.
                 if f.buf.is_empty() {
@@ -482,11 +498,15 @@ struct AcceptPending {
     client: Option<Socket>,
     addr_len: u32,
     result: Option<OverlappedResult>,
+    waker: Option<Waker>,
 }
 
 impl OverlappedData for Mutex<AcceptPending> {
-    fn set_completed(&self, r: OverlappedResult) {
-        self.lock().unwrap().result = Some(r);
+    fn set_completed(&self, r: OverlappedResult) -> Waker {
+        let mut p = self.lock().unwrap();
+
+        p.result = Some(r);
+        p.waker.take().unwrap()
     }
 }
 
@@ -494,6 +514,7 @@ impl OverlappedData for Mutex<AcceptPending> {
 struct ReadPending {
     cancel: Option<SOCKET>,
     result: Option<OverlappedResult>,
+    waker: Option<Waker>,
 }
 
 impl Drop for ReadPending {
@@ -516,11 +537,12 @@ impl Drop for ReadPending {
 }
 
 impl OverlappedData for Mutex<ReadPending> {
-    fn set_completed(&self, r: OverlappedResult) {
+    fn set_completed(&self, r: OverlappedResult) -> Waker {
         let mut p = self.lock().unwrap();
 
         p.result = Some(r);
         p.cancel = None;
+        p.waker.take().unwrap()
     }
 }
 
@@ -528,6 +550,7 @@ impl OverlappedData for Mutex<ReadPending> {
 struct WritePending {
     cancel: Option<SOCKET>,
     result: Option<OverlappedResult>,
+    waker: Option<Waker>,
 }
 
 impl Drop for WritePending {
@@ -550,10 +573,11 @@ impl Drop for WritePending {
 }
 
 impl OverlappedData for Mutex<WritePending> {
-    fn set_completed(&self, r: OverlappedResult) {
+    fn set_completed(&self, r: OverlappedResult) -> Waker {
         let mut p = self.lock().unwrap();
 
         p.result = Some(r);
         p.cancel = None;
+        p.waker.take().unwrap()
     }
 }
