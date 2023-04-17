@@ -75,7 +75,7 @@ impl Iocp {
     fn shutdown(&self) {
         if self
             .closed
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
             return;
@@ -158,7 +158,7 @@ impl EventQueue for Iocp {
         // Toggle shutdown if all tasks has been completed.
         if self
             .active_tasks
-            .compare_exchange(0, isize::MIN, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(0, isize::MIN, Ordering::Relaxed, Ordering::Relaxed)
             .is_err()
         {
             return true;
@@ -190,7 +190,7 @@ impl Runtime for Iocp {
 
     fn spawn<T: Future<Output = ()> + Send + 'static>(&self, task: T) -> Option<T> {
         // Increase the number of active tasks.
-        if self.active_tasks.fetch_add(1, Ordering::AcqRel) < 0 {
+        if self.active_tasks.fetch_add(1, Ordering::Relaxed) < 0 {
             return Some(task);
         }
 
