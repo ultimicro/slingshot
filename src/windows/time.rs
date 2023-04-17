@@ -7,11 +7,10 @@ use std::io::{Error, ErrorKind};
 use std::marker::PhantomData;
 use std::ops::DerefMut;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
-use windows_sys::Win32::Foundation::{BOOLEAN, ERROR_IO_PENDING};
+use windows_sys::Win32::Foundation::{BOOLEAN, ERROR_IO_PENDING, HANDLE};
 use windows_sys::Win32::System::Threading::{
     CreateTimerQueueTimer, DeleteTimerQueueTimer, WT_EXECUTEONLYONCE,
 };
@@ -19,28 +18,70 @@ use windows_sys::Win32::System::Threading::{
 /// A future of [`Iocp::delay()`].
 pub struct Delay<'a> {
     phantom: PhantomData<&'a Iocp>,
-    dur: Duration,
-    ct: Option<CancellationToken>,
-    ch: Option<SubscriptionHandle>,
-    timer: Option<Arc<Timer>>,
+    duration: Duration,
+    cancellation_token: Option<CancellationToken>,
+    cancellation_handle: Option<SubscriptionHandle>,
+    timer: Option<Arc<Mutex<Timer>>>,
 }
 
 impl<'a> Delay<'a> {
-    pub(crate) fn new(dur: Duration, ct: Option<CancellationToken>) -> Self {
+    pub(crate) fn new(duration: Duration, cancellation_token: Option<CancellationToken>) -> Self {
         Self {
             phantom: PhantomData,
-            dur,
-            ct,
-            ch: None,
+            duration,
+            cancellation_token,
+            cancellation_handle: None,
             timer: None,
         }
     }
 
-    unsafe extern "system" fn waker(param0: *mut c_void, _: BOOLEAN) {
-        if let Some(t) = Weak::from_raw(param0 as *const Timer).upgrade() {
-            t.elapsed.store(true, Ordering::Relaxed);
-            t.waker.wake_by_ref();
+    fn begin_timer(&mut self, cx: &mut Context, due: u32) -> Result<Arc<Mutex<Timer>>, Error> {
+        // Construct timer data.
+        let timer = Arc::new(Mutex::new(Timer {
+            handle: None,
+            waker: cx.waker().clone(),
+            elapsed: false,
+        }));
+
+        // Start timer.
+        let mut handle = 0;
+        let parameter = Weak::into_raw(Arc::downgrade(&timer));
+
+        if unsafe {
+            CreateTimerQueueTimer(
+                &mut handle,
+                0,
+                Some(Self::waker),
+                parameter as _,
+                due,
+                0,
+                WT_EXECUTEONLYONCE,
+            )
+        } == 0
+        {
+            let e = Error::last_os_error();
+            drop(unsafe { Weak::from_raw(parameter) });
+            return Err(e);
         }
+
+        // Store the handle.
+        timer.lock().unwrap().handle = Some(handle);
+
+        Ok(timer)
+    }
+
+    unsafe extern "system" fn waker(param0: *mut c_void, _: BOOLEAN) {
+        // Get timer.
+        let timer = match Weak::from_raw(param0 as *const Mutex<Timer>).upgrade() {
+            Some(v) => v,
+            None => return,
+        };
+
+        // Toggle elapsed and wake the task.
+        let mut t = timer.lock().unwrap();
+
+        t.elapsed = true;
+        t.waker.wake_by_ref();
     }
 }
 
@@ -51,9 +92,9 @@ impl<'a> Future for Delay<'a> {
         let f = self.deref_mut();
 
         // Check if canceled.
-        f.ch = None;
+        f.cancellation_handle = None;
 
-        if let Some(ct) = &f.ct {
+        if let Some(ct) = &f.cancellation_token {
             if ct.is_canceled() {
                 return io_cancel();
             }
@@ -61,14 +102,19 @@ impl<'a> Future for Delay<'a> {
 
         // Check timer state.
         match &f.timer {
-            Some(timer) => {
-                if timer.elapsed.load(Ordering::Relaxed) {
+            Some(t) => {
+                // Check if elapsed.
+                let mut t = t.lock().unwrap();
+
+                if t.elapsed {
                     return Poll::Ready(Ok(()));
+                } else {
+                    t.waker = cx.waker().clone();
                 }
             }
             None => {
                 // Get millisecond.
-                let due: u32 = match f.dur.as_millis().try_into() {
+                let due: u32 = match f.duration.as_millis().try_into() {
                     Ok(v) => v,
                     Err(_) => {
                         return Poll::Ready(Err(Error::new(
@@ -83,39 +129,15 @@ impl<'a> Future for Delay<'a> {
                 }
 
                 // Create a new timer.
-                let timer = Arc::new(Timer {
-                    handle: AtomicIsize::new(0),
-                    waker: cx.waker().clone(),
-                    elapsed: AtomicBool::new(false),
-                });
-
-                let mut handle = 0;
-                let parameter = Weak::into_raw(Arc::downgrade(&timer));
-
-                if unsafe {
-                    CreateTimerQueueTimer(
-                        &mut handle,
-                        0,
-                        Some(Self::waker),
-                        parameter as _,
-                        due,
-                        0,
-                        WT_EXECUTEONLYONCE,
-                    )
-                } == 0
-                {
-                    drop(unsafe { Weak::from_raw(parameter) });
-                    return Poll::Ready(Err(Error::last_os_error()));
-                } else {
-                    timer.handle.store(handle, Ordering::Relaxed);
-                }
-
-                f.timer = Some(timer);
+                f.timer = match f.begin_timer(cx, due) {
+                    Ok(v) => Some(v),
+                    Err(e) => return Poll::Ready(Err(e)),
+                };
             }
         }
 
         // Watch for cancel.
-        f.ch = watch_cancel(cx, &f.ct);
+        f.cancellation_handle = watch_cancel(cx, &f.cancellation_token);
 
         Poll::Pending
     }
@@ -123,17 +145,21 @@ impl<'a> Future for Delay<'a> {
 
 /// Encapsulate a Win32 timer.
 struct Timer {
-    handle: AtomicIsize,
+    handle: Option<HANDLE>,
     waker: Waker,
-    elapsed: AtomicBool,
+    elapsed: bool,
 }
 
 impl Drop for Timer {
     fn drop(&mut self) {
-        let handle = self.handle.load(Ordering::Relaxed);
+        // Check if we need to delete the timer.
+        let handle = match self.handle {
+            Some(v) => v,
+            None => return,
+        };
 
-        // Not sure what if the invalid handle timer is NULL or INVALID_HANDLE_VALUE.
-        if handle != 0 && unsafe { DeleteTimerQueueTimer(0, handle, 0) } == 0 {
+        // Delete the timer.
+        if unsafe { DeleteTimerQueueTimer(0, handle, 0) } == 0 {
             let e = Error::last_os_error();
 
             if e.raw_os_error().unwrap() != ERROR_IO_PENDING as _ {
