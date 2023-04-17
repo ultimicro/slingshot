@@ -28,7 +28,7 @@ where
 {
     // Toggle running flag.
     if RUNNING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
         .is_err()
     {
         panic!("the runtime is already running");

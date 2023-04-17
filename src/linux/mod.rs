@@ -262,7 +262,7 @@ impl EventQueue for Epoll {
         // Try to shutdown.
         if self
             .active_tasks
-            .compare_exchange(0, isize::MIN, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(0, isize::MIN, Ordering::Relaxed, Ordering::Relaxed)
             .is_err()
         {
             return true;
@@ -311,7 +311,7 @@ impl Runtime for Epoll {
 
     fn spawn<T: Future<Output = ()> + Send + 'static>(&self, task: T) -> Option<T> {
         // Check if being shutting down.
-        if self.active_tasks.fetch_add(1, Ordering::AcqRel) < 0 {
+        if self.active_tasks.fetch_add(1, Ordering::Relaxed) < 0 {
             return Some(task);
         }
 
