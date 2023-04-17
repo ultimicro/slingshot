@@ -23,6 +23,7 @@ use windows_sys::Win32::System::IO::{
 };
 
 pub mod handle;
+pub mod mem;
 pub mod overlapped;
 pub mod socket;
 pub mod tcp;
@@ -88,10 +89,8 @@ impl Iocp {
 
 impl Drop for Iocp {
     fn drop(&mut self) {
-        if !self.closed.load(Ordering::Acquire) {
-            if unsafe { CloseHandle(self.iocp) } == 0 {
-                panic!("cannot close the IOCP handle: {}", Error::last_os_error());
-            }
+        if !self.closed.load(Ordering::Acquire) && unsafe { CloseHandle(self.iocp) } == 0 {
+            panic!("cannot close the IOCP handle: {}", Error::last_os_error());
         }
     }
 }

@@ -1,3 +1,4 @@
+use super::mem::Buffer;
 use super::overlapped::{Overlapped, OverlappedData, OverlappedResult};
 use super::socket::Socket;
 use super::Iocp;
@@ -86,7 +87,7 @@ impl<'a> TcpAccept<'a> {
         self.iocp.register_handle(server as _)?;
 
         // Do the accept.
-        let buf = vec![0u8; (addr_len * 2) as usize];
+        let buf = Buffer::new((addr_len * 2) as usize);
         let mut received = 0;
         let overlapped = Box::into_raw(Overlapped::new(None, buf, Arc::downgrade(&pending)));
 
@@ -135,7 +136,7 @@ impl<'a> TcpAccept<'a> {
 
         unsafe {
             GetAcceptExSockaddrs(
-                buf.as_ptr() as _,
+                buf.get() as _,
                 0,
                 pending.addr_len,
                 pending.addr_len,
@@ -248,9 +249,7 @@ impl<'a> TcpRead<'a> {
     fn begin_read(&mut self, cx: &mut Context) -> Result<Arc<Mutex<ReadPending>>, Error> {
         // Allocate a buffer.
         let buf_len = min(self.buf.len(), u32::MAX as usize); // No plan to support Windows 16-bits.
-        let mut buf: Vec<u8> = Vec::with_capacity(buf_len);
-
-        unsafe { buf.set_len(buf_len) };
+        let buf = Buffer::new(buf_len);
 
         // Setup pending data.
         let socket = self.tcp.as_raw_socket() as SOCKET;
@@ -292,6 +291,22 @@ impl<'a> TcpRead<'a> {
 
         Ok(pending)
     }
+
+    fn end_read(pending: &mut ReadPending) -> Result<Option<Vec<u8>>, Error> {
+        // Get the result.
+        let result = match pending.result.take() {
+            Some(v) => v,
+            None => return Ok(None),
+        };
+
+        // Extract the result.
+        match result {
+            OverlappedResult::Error(e) => Err(e),
+            OverlappedResult::Success(buf, transferred) => unsafe {
+                Ok(Some(buf.into_vec(transferred)))
+            },
+        }
+    }
 }
 
 impl<'a> Future for TcpRead<'a> {
@@ -315,21 +330,14 @@ impl<'a> Future for TcpRead<'a> {
                 // Check if completed.
                 let mut p = p.lock().unwrap();
 
-                if let Some(r) = p.result.take() {
-                    let r = match r {
-                        OverlappedResult::Error(e) => Err(e),
-                        OverlappedResult::Success(buf, transferred) => {
-                            // Copy data.
-                            let src = &buf[..transferred];
-                            let dst = &mut f.buf[..transferred];
-
-                            dst.copy_from_slice(src);
-
-                            Ok(transferred)
+                match Self::end_read(&mut p) {
+                    Ok(v) => {
+                        if let Some(v) = v {
+                            f.buf[..v.len()].copy_from_slice(&v);
+                            return Poll::Ready(Ok(v.len()));
                         }
-                    };
-
-                    return Poll::Ready(r);
+                    }
+                    Err(e) => return Poll::Ready(Err(e)),
                 }
 
                 p.waker = Some(cx.waker().clone());
@@ -384,7 +392,7 @@ impl<'a> TcpWrite<'a> {
     fn begin_write(&mut self, cx: &mut Context) -> Result<Arc<Mutex<WritePending>>, Error> {
         // Copy data to send buffer.
         let buf_len = min(self.buf.len(), u32::MAX as usize); // No plan to support Windows 16-bits.
-        let buf: Vec<u8> = self.buf[..buf_len].to_vec();
+        let buf = self.buf[..buf_len].try_into().unwrap();
 
         // Setup pending data.
         let socket = self.tcp.as_raw_socket() as SOCKET;
