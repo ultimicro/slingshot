@@ -217,8 +217,8 @@ impl Runtime for Iocp {
         tcp: &'a mut TcpStream,
         buf: &'a [u8],
         ct: Option<CancellationToken>,
-    ) -> Self::TcpWrite<'a> {
-        todo!();
+    ) -> TcpWrite<'a> {
+        TcpWrite::new(self, tcp, buf, ct)
     }
 
     fn delay(&self, dur: Duration, ct: Option<CancellationToken>) -> Delay<'_> {
