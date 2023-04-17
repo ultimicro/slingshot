@@ -14,7 +14,8 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::thread::available_parallelism;
 use std::time::Duration;
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ABANDONED_WAIT_0, FALSE, HANDLE, INVALID_HANDLE_VALUE,
+    CloseHandle, ERROR_ABANDONED_WAIT_0, ERROR_INVALID_PARAMETER, FALSE, HANDLE,
+    INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::System::Threading::INFINITE;
 use windows_sys::Win32::System::IO::{
@@ -59,10 +60,15 @@ impl Iocp {
 
     fn register_handle(&self, handle: HANDLE) -> Result<(), Error> {
         if unsafe { CreateIoCompletionPort(handle, self.iocp, 0, 0) } == 0 {
-            Err(Error::last_os_error())
-        } else {
-            Ok(())
+            // Check if the handle already registered.
+            let e = Error::last_os_error();
+
+            if e.raw_os_error().unwrap() != ERROR_INVALID_PARAMETER as _ {
+                return Err(e);
+            }
         }
+
+        Ok(())
     }
 
     fn shutdown(&self) {
