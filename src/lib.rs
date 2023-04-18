@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
+pub mod bsd;
 pub mod cancel;
 #[cfg(unix)]
 pub mod fd;
