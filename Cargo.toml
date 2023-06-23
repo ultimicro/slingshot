@@ -2,12 +2,6 @@
 name = "slingshot"
 version = "0.2.0"
 edition = "2021"
-description = "Bare metal async runtime that works with std types"
+description = "Abstraction for async runtime that works with std types"
 repository = "https://github.com/ultimicro/slingshot"
 license = "MIT"
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.48", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_System_IO", "Win32_System_Threading"] }

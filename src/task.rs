@@ -1,12 +1,12 @@
-use crate::EventQueue;
+use crate::{EventQueue, Status};
 use std::future::Future;
-use std::mem::{forget, swap};
+use std::mem::swap;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{RawWaker, RawWakerVTable};
 
 /// Contains the data required to wake a future.
-pub(crate) struct WakerData {
+pub struct WakerData {
     queue: &'static dyn EventQueue,
     state: FutureState,
 }
@@ -26,8 +26,8 @@ impl WakerData {
     /// Returns [`Some`] if the task has been waked up during [`Future::poll()`].
     pub fn set_pending(
         &mut self,
-        task: Pin<Box<dyn Future<Output = ()> + Send>>,
-    ) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
+        task: Pin<Box<dyn Future<Output = Status<()>> + Send>>,
+    ) -> Option<Pin<Box<dyn Future<Output = Status<()>> + Send>>> {
         match self.state {
             FutureState::Polling => {
                 self.state = FutureState::Pending(task);
@@ -38,7 +38,7 @@ impl WakerData {
         }
     }
 
-    pub fn wake(&mut self) {
+    fn wake(&mut self) {
         // Do nothing if the task is already waked.
         if let FutureState::Waked = self.state {
             return;
@@ -61,24 +61,20 @@ impl WakerData {
 /// Represents a state of the future on [`WakerData`].
 enum FutureState {
     Polling,
-    Pending(Pin<Box<dyn Future<Output = ()> + Send>>),
+    Pending(Pin<Box<dyn Future<Output = Status<()>> + Send>>),
     Waked,
 }
 
 /// [`RawWakerVTable`] implementation for [`WakerData`].
 static WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
-    |data| {
-        unsafe { Arc::increment_strong_count(data as *const Mutex<WakerData>) };
+    |data| unsafe {
+        Arc::increment_strong_count(data as *const Mutex<WakerData>);
         RawWaker::new(data, &WAKER_VTABLE)
     },
-    |data| {
-        let data = unsafe { Arc::from_raw(data as *const Mutex<WakerData>) };
+    |data| unsafe {
+        let data = Arc::from_raw(data as *const Mutex<WakerData>);
         data.lock().unwrap().wake();
     },
-    |data| {
-        let data = unsafe { Arc::from_raw(data as *const Mutex<WakerData>) };
-        data.lock().unwrap().wake();
-        forget(data);
-    },
+    |data| unsafe { (*(data as *const Mutex<WakerData>)).lock().unwrap().wake() },
     |data| unsafe { Arc::decrement_strong_count(data as *const Mutex<WakerData>) },
 );

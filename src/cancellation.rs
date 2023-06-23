@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::Waker;
 
 /// An object to signal a cancellation.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CancellationToken {
     data: Arc<TokenData>,
 }
@@ -11,11 +13,7 @@ pub struct CancellationToken {
 impl CancellationToken {
     pub fn new() -> Self {
         Self {
-            data: Arc::new(TokenData {
-                subscribers: Mutex::new(HashMap::new()),
-                next_id: AtomicUsize::new(0),
-                canceled: AtomicBool::new(false),
-            }),
+            data: Arc::default(),
         }
     }
 
@@ -36,24 +34,26 @@ impl CancellationToken {
             return;
         }
 
+        // Move out the subscribers and give up the lock.
+        let wakers = std::mem::take(subscribers.deref_mut()).into_values();
+        drop(subscribers);
+
         // Invoke all subscribers.
-        for (_, h) in subscribers.drain() {
-            h();
+        for w in wakers {
+            w.wake();
         }
     }
 
-    /// The order of invocation for `h` is unspecified.
-    pub fn subscribe<H>(&self, h: H) -> Option<SubscriptionHandle>
-    where
-        H: FnOnce() + Send + 'static,
-    {
+    /// The order of invocation for `waker` is unspecified.
+    pub fn subscribe(&self, waker: Waker) -> Option<CancellationSubscription> {
         use std::collections::hash_map::Entry;
 
         // Invoke the handler immediately if we already canceled.
         let mut subscribers = self.data.subscribers.lock().unwrap();
 
-        if self.is_canceled() {
-            h();
+        if self.data.canceled.load(Ordering::Relaxed) {
+            drop(subscribers);
+            waker.wake();
             return None;
         }
 
@@ -63,44 +63,52 @@ impl CancellationToken {
 
             match subscribers.entry(k) {
                 Entry::Occupied(_) => continue,
-                Entry::Vacant(e) => {
-                    e.insert(Box::new(h));
-                    break k;
-                }
-            }
+                Entry::Vacant(e) => e.insert(waker),
+            };
+
+            break k;
         };
 
         drop(subscribers);
 
         // Construct the handle.
-        Some(SubscriptionHandle {
+        Some(CancellationSubscription {
             data: self.data.clone(),
             id,
         })
     }
 }
 
-impl Default for CancellationToken {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// An object to unsubscribe from [`CancellationToken`] when dropped.
-pub struct SubscriptionHandle {
+/// A subscription to [`CancellationToken`].
+pub struct CancellationSubscription {
     data: Arc<TokenData>,
     id: usize,
 }
 
-impl Drop for SubscriptionHandle {
+impl CancellationSubscription {
+    pub fn update(&mut self, waker: Waker) {
+        let mut subscribers = self.data.subscribers.lock().unwrap();
+
+        if self.data.canceled.load(Ordering::Relaxed) {
+            drop(subscribers);
+            waker.wake();
+            return;
+        }
+
+        subscribers.insert(self.id, waker);
+    }
+}
+
+impl Drop for CancellationSubscription {
     fn drop(&mut self) {
         self.data.subscribers.lock().unwrap().remove(&self.id);
     }
 }
 
 /// Contains a data for [`CancellationToken`].
+#[derive(Default)]
 struct TokenData {
-    subscribers: Mutex<HashMap<usize, Box<dyn FnOnce() + Send>>>,
+    subscribers: Mutex<HashMap<usize, Waker>>,
     next_id: AtomicUsize,
     canceled: AtomicBool,
 }
