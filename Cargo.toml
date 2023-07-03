@@ -1,6 +1,6 @@
 [package]
 name = "slingshot"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Abstraction for async runtime that works with std types"
 repository = "https://github.com/ultimicro/slingshot"
